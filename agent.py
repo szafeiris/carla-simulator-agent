@@ -41,6 +41,7 @@ DATA_FL_NAME = "data.bin"
 
 CAR_SPAWN_NO = 9
 
+
 HISTORY_LIM  = 4000
 
 ACT_THROTTLE = 0
@@ -54,6 +55,7 @@ PNLT_HGHSPD  = 20
 PNLT_LOWSPD  = 10
 
 INC_NEEDED   = 10000
+INC_TIME_LIM = 1
 
 AVLBL_ACTNS  = [ACT_THROTTLE, ACT_BRAKE, ACT_LEFT, ACT_RIGHT, ACT_NOTHNG]
 
@@ -90,16 +92,24 @@ class Car(object):
 class CarAgent(Car):
 
     def image_processing(self, image):
-        if SAVE_IMAGE:
-            image.save_to_disk( IMAGE_FOLDER + '%08d' % image.frame_number)                 # Save image to disk (if enabled)
-
         # Variable image.raw_data is an array of BGRA 32-bit pixels
         rgb_img = np.array(image.raw_data).reshape((IMAGE_WIDTH, IMAGE_HEIGHT, 4))[:,:,:3]  # Transform image to RGB format
 
         if SHOW_IMAGE:
             cv2.imshow("RGB Camera output", rgb_img)
             cv2.waitKey(1)
-    
+        
+        if SAVE_IMAGE and (time.time() - self.inc_time > INC_TIME_LIM):                          # Save image to disk (if enabled)
+            (throttle, brake, steer) = self.get_applied_vehicle_control()
+            (reward, simulate) = self.get_current_reward()
+
+            image.save_to_disk( IMAGE_FOLDER + str(image.frame_number) + '_' + 
+                                str(throttle) + '_' + str(brake) + '_' + str(steer)
+                                 + '_' + str(reward) + '_' + str(simulate) + '.png')
+            
+            self.inc_time = time.time()
+            self.incidents_captured = self.incidents_captured + 1
+                
         self.rgb_img = rgb_img
 
     def on_collision(self, event):
@@ -117,6 +127,8 @@ class CarAgent(Car):
         self.actors = []
         self.history = []
         self.simulate = True
+        self.inc_time = time.time()
+        self.incidents_captured = 0
 
         car_blueprint  = world.get_blueprint_library().find('vehicle.ford.mustang')         # Get our test car
         car_blueprint.set_attribute('color', '255,0,0')                                     # Red Mustang!
@@ -186,6 +198,9 @@ class CarAgent(Car):
     
     def disable_autopilot(self):
         self.vehicle.set_autopilot(False)
+    
+    def get_icnident_captured(self):
+        return self.incidents_captured
 
     def get_current_reward(self):
         v = self.calculate_vehicle_velocity()
@@ -260,18 +275,10 @@ class Enviroment():
         try:
             self.carAgent.enable_autopilot()                                # Drive autonomusly to create a dataset
             logging.info("Simulation started.")
-            time.sleep(5)
-            while batches > 0:
-                while len(self.incidents) < INC_NEEDED:
-                    self.incidents.append( (self.carAgent.get_applied_vehicle_control(), self.carAgent.get_current_reward(), self.carAgent.get_last_img()) )
-                batches = batches - 1
-
-                # Flush incidents to file
-                #file = open(DATA_FL_NAME, 'a')
-                #for d in self.incidents:
-                #    pickle.dump(d, file)
-                #self.incidents.clear()
-
+            #time.sleep(5)
+            while self.carAgent.get_icnident_captured() < INC_NEEDED:
+                pass
+                #self.incidents.append( (self.carAgent.get_applied_vehicle_control(), self.carAgent.get_current_reward()) )
             logging.info("Simulation finished.")
             
         except KeyboardInterrupt:
@@ -295,20 +302,6 @@ def main():
         env.run_gather()
     except Exception as e:
         print(e)
-    finally:
-        for ecar in env.cars:
-            ecar.destroy_actors()
-
-
-    inc = env.get_incidents()[80]
-    print(inc[0])
-    print(inc[1])
-    print(inc[2].shape)
-    print(len(env.get_incidents()))
-
-    cv2.imshow("Final", inc[2])
-    x = input("Press enter to exit...")
-
 
 
 if __name__ == '__main__':
